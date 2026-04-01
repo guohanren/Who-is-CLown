@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
 
-const CFG={MAP:60,WALK:4,SPRINT:7,AI:8,TIME:240,RAGE_T:60,AR:3.5,AD:100,ACD:.8,WHP:50,MHP:200,SENS:.004,PSR:9,PSD:20,PSCD:1.2,PMK:30,WIN_W:5,COL_T:3};
+const CFG={MAP:60,WALK:4,SPRINT:7,AI:8,TIME:240,RAGE_T:60,AR:3.5,AD:100,ACD:1.2,WHP:50,MHP:200,SENS:.004,PSR:9,PSD:25,PSCD:1.2,PMK:30,WIN_W:5,COL_T:3};
 const BD=[[-8,-8,6,5,8],[8,-10,8,4,6],[-12,8,5,6,5],[10,6,7,4,7],[0,15,10,3,4],[-18,-2,4,5,10],[18,-3,5,4,8],[0,-18,12,3,5],[-22,16,6,4,6],[22,14,5,5,5],[-20,-16,7,3,7],[20,-16,6,4,6]];
 const WP=[[-25,-22],[25,-20],[-24,22],[24,20],[0,-26],[0,26]];
 const px=c=>new THREE.MeshLambertMaterial({color:c,flatShading:true});
@@ -542,7 +542,7 @@ export default function MultiplayerGame({ onBack }) {
       Object.entries(G.otherPlayers).forEach(([id, op]) => {
         if (!op.alive || op.role !== 'clown') return;
         const d = G.pos.distanceTo(op.p);
-        if (d < 20 && d < hd2) {
+        if (d < 30 && d < hd2) {
           const tc = new THREE.Vector3().subVectors(op.p, G.pos); tc.y = 0; tc.normalize();
           if (tc.dot(dir) > .65) { hit = { id, op }; hd2 = d; }
         }
@@ -551,7 +551,7 @@ export default function MultiplayerGame({ onBack }) {
       G.ais.forEach((c, i) => {
         if (!c.a) return;
         const d = G.pos.distanceTo(c.p);
-        if (d < 20 && d < hd2) {
+        if (d < 30 && d < hd2) {
           const tc = new THREE.Vector3().subVectors(c.p, G.pos); tc.y = 0; tc.normalize();
           if (tc.dot(dir) > .65) { hit = null; hitAI = { idx: i, c }; hd2 = d; }
         }
@@ -805,8 +805,8 @@ export default function MultiplayerGame({ onBack }) {
         <div style={{ position: 'absolute', bottom: 0, left: 0, width: '42%', height: 195, zIndex: 20 }} onTouchStart={onJS} onTouchMove={onJM} onTouchEnd={onJE} onTouchCancel={onJE}><div data-jb="1" style={{ position: 'absolute', width: 88, height: 88, borderRadius: '50%', background: 'rgba(255,255,255,.05)', border: '2px solid rgba(255,255,255,.12)', bottom: 34, left: 24 }}><div ref={knobRef} style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(255,255,255,.15)', border: '2px solid rgba(255,255,255,.2)', position: 'absolute', top: '50%', left: '50%', marginTop: -17, marginLeft: -17 }} /></div></div>
         <div style={{ position: 'absolute', top: 70, bottom: 0, right: 0, width: '58%', zIndex: 15 }} onTouchStart={onLS} onTouchMove={onLM} onTouchEnd={onLE} onTouchCancel={onLE} />
         <div style={{ position: 'absolute', bottom: 24, right: 10, zIndex: 25, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <button style={{ width: 50, height: 50, border: '2px solid ' + (h.spr ? '#fa0' : 'rgba(255,255,255,.15)'), background: h.spr ? 'rgba(255,165,0,.2)' : 'rgba(0,0,0,.3)', color: '#fff', fontSize: 8, fontWeight: 700, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }} onTouchStart={e => { e.preventDefault(); e.stopPropagation(); if (gRef.current) gRef.current.spr = !gRef.current.spr; }} onClick={() => { if (gRef.current) gRef.current.spr = !gRef.current.spr; }}><span style={{ fontSize: 16 }}>💨</span><span>RUN</span></button>
-          <button style={{ width: 50, height: 50, border: '2px solid rgba(255,255,255,.15)', background: 'rgba(0,0,0,.3)', color: '#fff', fontSize: 8, fontWeight: 700, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }} onTouchStart={e => { e.preventDefault(); e.stopPropagation(); doAtk(); }} onClick={doAtk}><span style={{ fontSize: 16 }}>{h.rl === 'clown' ? '⚔️' : '🔫'}</span><span>{h.rl === 'clown' ? 'ATK' : 'FIRE'}</span></button>
+          <button style={{ width: 72, height: 72, borderRadius: 12, border: '2px solid ' + (h.spr ? '#fa0' : 'rgba(255,255,255,.15)'), background: h.spr ? 'rgba(255,165,0,.2)' : 'rgba(0,0,0,.3)', color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }} onTouchStart={e => { e.preventDefault(); e.stopPropagation(); if (gRef.current) gRef.current.spr = !gRef.current.spr; }} onClick={() => { if (gRef.current) gRef.current.spr = !gRef.current.spr; }}><span style={{ fontSize: 24 }}>💨</span><span>RUN</span></button>
+          <button style={{ width: 72, height: 72, borderRadius: 12, border: '2px solid rgba(255,255,255,.15)', background: 'rgba(0,0,0,.3)', color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }} onTouchStart={e => { e.preventDefault(); e.stopPropagation(); doAtk(); }} onClick={doAtk}><span style={{ fontSize: 24 }}>{h.rl === 'clown' ? '⚔️' : '🔫'}</span><span>{h.rl === 'clown' ? 'ATK' : 'FIRE'}</span></button>
         </div>
       </>}
 
