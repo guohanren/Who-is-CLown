@@ -106,7 +106,7 @@ function fS(mr){const h=CFG.MAP/2-3;for(let i=0;i<100;i++){const x=(Math.random(
 function navMove(agent,target,speed,dt,neighbors=[]){return moveAgent(agent,target,speed,dt,bx,CFG.MAP/2-1,{neighbors,separationDistance:1.05});}
 
 const ais=[];for(let i=0;i<CFG.AI;i++){const s=fS(0);const m=mkClown(sc);m.position.set(s.x,0,s.z);ais.push({m,p:new THREE.Vector3(s.x,0,s.z),t:null,sp:1+Math.random()*1.2,w:Math.random()*3,a:true,beh:'wander',behT:2,lookDir:0,zigAmp:.3,zigFreq:3,phase:Math.random()*Math.PI*2,isReal:i<3,capProg:0,capTarget:null,chp:i<3?100:30,atkCop:null});}
-const cops=[];for(let i=0;i<CFG.COPS;i++){const s=fS(12);const m=mkCop(sc);m.position.set(s.x,0,s.z);const wp=[];for(let j=0;j<4;j++){const q=fS(4);wp.push(new THREE.Vector3(q.x,0,q.z));}cops.push({m,p:new THREE.Vector3(s.x,0,s.z),r:0,hp:100,mhp:100,st:'patrol',wp,wi:0,cd:0,a:true,su:0,nm:CN[i],huntTarget:null,huntCD:0,lastSeen:null,searchT:0,guardTarget:null,guardT:0});}
+const cops=[];for(let i=0;i<CFG.COPS;i++){const s=fS(12);const m=mkCop(sc);m.position.set(s.x,0,s.z);const wp=[];for(let j=0;j<4;j++){const q=fS(4);wp.push(new THREE.Vector3(q.x,0,q.z));}cops.push({m,p:new THREE.Vector3(s.x,0,s.z),r:0,hp:100,mhp:100,st:'patrol',wp,wi:0,cd:0,a:true,su:0,nm:CN[i],huntTarget:null,huntCD:0,lastSeen:null,searchT:0,guardTarget:null,lastGuardTarget:null,guardT:0,guardAngle:Math.random()*Math.PI*2});}
 const wals=[];WP.forEach(([wx,wz])=>{let x=wx,z=wz;if(inB(x,z)){const s=fS(4);x=s.x;z=s.z;}const m=mkWal(sc);m.position.set(x,0,z);wals.push({m,p:new THREE.Vector3(x,0,z),tk:false});});
 
 const feed=[];function af(msg,col){feed.push({msg,col,t:4});if(feed.length>5)feed.shift();}
@@ -196,8 +196,9 @@ if(p.st==='patrol'&&p.huntCD<=0&&!p.huntTarget){
     const suspicious=targetClown.isReal&&['steal','capturing','hunt_cop','flee_cop'].includes(targetClown.beh);
     if(Math.random()<(suspicious ? .72 : .12)){p.huntTarget=targetClown;p.st='hunt_clown';p.searchT=3;clearNavigation(p);}
   }else if(Math.random()<.34){
-    const available=wals.filter(w=>!w.tk);
-    if(available.length){p.guardTarget=available[Math.floor(Math.random()*available.length)];p.guardT=2.5+Math.random()*2.5;p.st='guard_wallet';clearNavigation(p);}
+    let available=wals.filter(w=>!w.tk&&w!==p.lastGuardTarget);
+    if(!available.length)available=wals.filter(w=>!w.tk);
+    if(available.length){p.guardTarget=available[Math.floor(Math.random()*available.length)];p.lastGuardTarget=p.guardTarget;p.guardT=4+Math.random()*2;p.guardAngle=Math.random()*Math.PI*2;p.st='guard_wallet';clearNavigation(p);}
   }
 }
 
@@ -230,8 +231,10 @@ if(p.st==='patrol'){
   else if(p.p.distanceTo(p.guardTarget.p)>2.4){
     applyMove(p,navMove(p,p.guardTarget.p,CFG.PP*.9,dt,cops),CFG.PP*.9,G.gameT,dt);
   }else{
-    p.guardT-=dt;turnAgent(p,Math.sin(G.gameT*.75+p.wi),Math.cos(G.gameT*.75+p.wi),dt);aI(p.m,G.gameT);
-    if(p.guardT<=0)resumePatrol();
+    p.guardT-=dt;p.guardAngle+=dt*.72;
+    const orbitTarget=new THREE.Vector3(p.guardTarget.p.x+Math.cos(p.guardAngle)*1.8,0,p.guardTarget.p.z+Math.sin(p.guardAngle)*1.8);
+    applyMove(p,navMove(p,orbitTarget,CFG.PP*.7,dt,cops),CFG.PP*.7,G.gameT,dt);
+    if(p.guardT<=0){p.huntCD=1.5+Math.random()*2;resumePatrol();}
   }
 }else if(p.st==='hunt_clown'){
   const ht=p.huntTarget;
@@ -271,7 +274,7 @@ function doSwitch(){const G=gRef.current;if(!G)return;G.audio.unlock();G.role='p
 function startReload(){const G=gRef.current;if(!G||!G.alive||G.role!=='police'||G.reloadT>0||G.ammo>=12||G.reserve<=0)return;G.audio.unlock();G.audio.reload();G.reloadT=G.reloadMax;G.al='↻ RELOADING';G.at=G.reloadMax;G.af('↻ 换弹中...','#74b9ff');}
 
 function doAtk(){const G=gRef.current;if(!G||G.acd>0||!G.alive)return;G.audio.unlock();
-if(G.role==='clown'){G.acd=CFG.ACD;G.weapons.fire('clown');G.audio.slash();let n=null,md=CFG.AR;G.cops.forEach(p=>{if(!p.a)return;const d=G.pos.distanceTo(p.p);if(d<md){md=d;n=p;}});if(n){n.hp=0;n.a=false;n.m.visible=false;G.pfx.hit(n.p);G.audio.hit();G.shake=.1;G.al='💀 ONE HIT!';G.at=2;G.af('💀 击杀 '+n.nm+'！','#2ed573');G.cops.forEach(p=>{if(p.a&&p.p.distanceTo(G.pos)<14)p.st='chase';});}else{G.al='⚔️ MISS';G.at=1;}}
+if(G.role==='clown'){G.acd=CFG.ACD;G.weapons.fire('clown');G.audio.slash();let n=null,md=CFG.AR;G.cops.forEach(p=>{if(!p.a)return;const d=G.pos.distanceTo(p.p);if(d<md){md=d;n=p;}});if(n){n.hp=0;n.a=false;n.m.visible=false;G.pfx.hit(n.p);G.audio.hit();G.shake=.1;G.al='💀 ONE HIT!';G.at=2;G.af('💀 击杀 '+n.nm+'！','#2ed573');G.cops.forEach(p=>{if(p.a&&p.p.distanceTo(G.pos)<14){p.st='chase';p.lastSeen=G.pos.clone();p.searchT=3.5;clearNavigation(p);}});}else{G.al='⚔️ MISS';G.at=1;}}
 else{if(G.reloadT>0)return;if(G.ammo<=0){G.audio.empty();startReload();return;}G.acd=CFG.ACD;G.ammo--;G.weapons.fire('police');G.audio.shoot();G.shake=.09;const dir=new THREE.Vector3();G.cam.getWorldDirection(dir);let hit=null,hd2=Infinity;G.ais.forEach(c=>{if(!c.a)return;const d=G.pos.distanceTo(c.p);if(d<CFG.PSR&&d<hd2){const tc=new THREE.Vector3().subVectors(c.p,G.pos).normalize();if(tc.dot(dir)>.82){hit=c;hd2=d;}}});if(hit){G.pfx.hit(hit.p);G.audio.hit();if(hit.isReal){hit.chp=(hit.chp===undefined?100:hit.chp);hit.chp-=50;if(hit.chp<=0){hit.a=false;hit.m.visible=false;G.al='✅ KILLED!';G.at=2;G.af('✅ 击杀真小丑！','#2ed573');}else{G.al='🔫 HIT!';G.at=1.5;G.af('🔫 命中 [-50HP]','#ffa502');}}else{hit.a=false;hit.m.visible=false;G.hp-=CFG.PMK;G.hitFlash=.55;G.al='❌ FRIENDLY -'+CFG.PMK;G.at=2;G.af('❌ 误杀AI [-'+CFG.PMK+']','#e74c3c');}}else{G.pfx.miss(G.pos.clone().add(dir.multiplyScalar(7)).add(new THREE.Vector3(0,1.2,0)));G.al='🔫 MISS';G.at=1;}if(G.ammo===0&&G.reserve>0)setTimeout(startReload,220);}}
 
 useEffect(()=>{const kd=e=>{const key=e.key.toLowerCase();keysR.current[key]=true;if(e.key===' ')doAtk();if(key==='r')startReload();};const ku=e=>{keysR.current[e.key.toLowerCase()]=false;};window.addEventListener('keydown',kd);window.addEventListener('keyup',ku);return()=>{window.removeEventListener('keydown',kd);window.removeEventListener('keyup',ku);};},[]);
