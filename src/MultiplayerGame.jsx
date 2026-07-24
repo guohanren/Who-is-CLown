@@ -1,35 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
+import { aI, aW, mkClown, mkCop } from "./characters";
 
 const CFG={MAP:60,WALK:4,SPRINT:7,AI:8,TIME:240,RAGE_T:60,AR:3.5,AD:100,ACD:1.2,WHP:50,MHP:200,SENS:.004,PSR:9,PSD:25,PSCD:1.2,PMK:30,WIN_W:5,COL_T:3};
 const BD=[[-8,-8,6,5,8],[8,-10,8,4,6],[-12,8,5,6,5],[10,6,7,4,7],[0,15,10,3,4],[-18,-2,4,5,10],[18,-3,5,4,8],[0,-18,12,3,5],[-22,16,6,4,6],[22,14,5,5,5],[-20,-16,7,3,7],[20,-16,6,4,6]];
 const WP=[[-25,-22],[25,-20],[-24,22],[24,20],[0,-26],[0,26]];
 const px=c=>new THREE.MeshStandardMaterial({color:c,flatShading:true,roughness:.85,metalness:.05});
 
-function mkMC(skin,shirt,pants,shoe){const g=new THREE.Group();
-const h=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),px(skin));h.position.set(0,1.65,0);g.add(h);
-const b=new THREE.Mesh(new THREE.BoxGeometry(.5,.65,.3),px(shirt));b.position.set(0,1.125,0);g.add(b);
-const la=new THREE.Mesh(new THREE.BoxGeometry(.2,.6,.2),px(shirt));la.position.set(-.37,1.1,0);g.add(la);
-const ra=new THREE.Mesh(new THREE.BoxGeometry(.2,.6,.2),px(shirt));ra.position.set(.37,1.1,0);g.add(ra);
-const ll=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.22),px(pants));ll.position.set(-.14,.5,0);g.add(ll);
-const rl=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.22),px(pants));rl.position.set(.14,.5,0);g.add(rl);
-const ls=new THREE.Mesh(new THREE.BoxGeometry(.24,.12,.28),px(shoe));ls.position.set(-.14,.2,.02);g.add(ls);
-const rs=new THREE.Mesh(new THREE.BoxGeometry(.24,.12,.28),px(shoe));rs.position.set(.14,.2,.02);g.add(rs);
-g.userData={la,ra,ll,rl,head:h};return g;}
-
 function enableShadows(g){g.traverse(c=>{if(c.isMesh){c.castShadow=true;c.receiveShadow=true;}});}
-
-function mkClown(sc){const g=mkMC(0xffcc99,0xcc2222,0x2244aa,0x442200);
-const n=new THREE.Mesh(new THREE.BoxGeometry(.12,.12,.12),px(0xff0000));n.position.set(0,1.62,.28);g.add(n);
-const ht=new THREE.Mesh(new THREE.BoxGeometry(.55,.2,.55),px(0x884422));ht.position.set(0,2,0);g.add(ht);
-const ht2=new THREE.Mesh(new THREE.BoxGeometry(.35,.25,.35),px(0x993322));ht2.position.set(0,2.15,0);g.add(ht2);
-enableShadows(g);if(sc)sc.add(g);return g;}
-
-function mkCop(sc){const g=mkMC(0xffddb3,0x1a3355,0x112244,0x111111);
-const hm=new THREE.Mesh(new THREE.BoxGeometry(.55,.2,.55),px(0x0a0a22));hm.position.set(0,1.97,0);g.add(hm);
-const vi=new THREE.Mesh(new THREE.BoxGeometry(.45,.1,.05),px(0x334488));vi.position.set(0,1.85,.26);g.add(vi);
-const gn=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,.4),px(0x333333));gn.position.set(.42,1,.15);g.add(gn);
-enableShadows(g);if(sc)sc.add(g);return g;}
 
 // 粒子特效系统
 function mkParticles(sc){
@@ -81,9 +59,6 @@ function mkLabel(sc, name, role){
   if(sc)sc.add(g);
   return {g,mesh};
 }
-
-function aW(m,t,s){const d=m.userData;if(!d||!d.la)return;const v=Math.sin(t*s*2.5)*.3;d.la.rotation.x=v;d.ra.rotation.x=-v;d.ll.rotation.x=-v*.5;d.rl.rotation.x=v*.5;}
-function aI(m,t){const d=m.userData;if(!d||!d.la)return;d.la.rotation.x=0;d.ra.rotation.x=0;d.ll.rotation.x=0;d.rl.rotation.x=0;if(d.head)d.head.rotation.y=Math.sin(t*.8)*.25;}
 
 function mkGroundTex(){
 const cv=document.createElement('canvas');cv.width=256;cv.height=256;

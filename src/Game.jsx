@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
+import { aI, aW, mkClown, mkCop } from "./characters";
 import { createCombatFx, createFirstPersonWeapons, createGameAudio } from "./fpsPresentation";
 
 const CFG={MAP:60,WALK:4,SPRINT:7,AI:10,COPS:3,WIN_W:5,COL_T:3,TIME:240,RAGE_T:60,PV:12,PA:Math.PI*.55,PC:5,PP:2.5,PSR:9,PSD:20,PSCD:1.2,PMK:30,AR:3.5,AD:100,ACD:.8,WHP:50,MHP:200,SENS:.004};
@@ -10,34 +11,6 @@ const px=(c,extra={})=>new THREE.MeshStandardMaterial({color:c,roughness:.78,met
 
 function enableShadows(g){g.traverse(c=>{if(c.isMesh){c.castShadow=true;c.receiveShadow=true;}});}
 
-function mkMC(skin,shirt,pants,shoe){const g=new THREE.Group();
-const h=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),px(skin));h.position.set(0,1.65,0);g.add(h);
-const b=new THREE.Mesh(new THREE.BoxGeometry(.5,.65,.3),px(shirt));b.position.set(0,1.125,0);g.add(b);
-const la=new THREE.Mesh(new THREE.BoxGeometry(.2,.6,.2),px(shirt));la.position.set(-.37,1.1,0);g.add(la);
-const ra=new THREE.Mesh(new THREE.BoxGeometry(.2,.6,.2),px(shirt));ra.position.set(.37,1.1,0);g.add(ra);
-const ll=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.22),px(pants));ll.position.set(-.14,.5,0);g.add(ll);
-const rl=new THREE.Mesh(new THREE.BoxGeometry(.22,.6,.22),px(pants));rl.position.set(.14,.5,0);g.add(rl);
-const ls=new THREE.Mesh(new THREE.BoxGeometry(.24,.12,.28),px(shoe));ls.position.set(-.14,.2,.02);g.add(ls);
-const rs=new THREE.Mesh(new THREE.BoxGeometry(.24,.12,.28),px(shoe));rs.position.set(.14,.2,.02);g.add(rs);
-g.userData={la,ra,ll,rl,head:h};return g;}
-
-function mkClown(sc){const g=mkMC(0xffcc99,0xcc2222,0x2244aa,0x442200);
-const n=new THREE.Mesh(new THREE.BoxGeometry(.12,.12,.12),px(0xff0000));n.position.set(0,1.62,.28);g.add(n);
-const ht=new THREE.Mesh(new THREE.BoxGeometry(.55,.2,.55),px(0x884422));ht.position.set(0,2,0);g.add(ht);
-const ht2=new THREE.Mesh(new THREE.BoxGeometry(.35,.25,.35),px(0x993322));ht2.position.set(0,2.15,0);g.add(ht2);
-const le=new THREE.Mesh(new THREE.BoxGeometry(.08,.06,.02),px(0));le.position.set(-.1,1.7,.26);g.add(le);
-const re=new THREE.Mesh(new THREE.BoxGeometry(.08,.06,.02),px(0));re.position.set(.1,1.7,.26);g.add(re);
-const sm=new THREE.Mesh(new THREE.BoxGeometry(.2,.04,.02),px(0));sm.position.set(0,1.55,.26);g.add(sm);
-enableShadows(g);sc.add(g);return g;}
-
-function mkCop(sc){const g=mkMC(0xffddb3,0x1a3355,0x112244,0x111111);
-const hm=new THREE.Mesh(new THREE.BoxGeometry(.55,.2,.55),px(0x0a0a22));hm.position.set(0,1.97,0);g.add(hm);
-const vi=new THREE.Mesh(new THREE.BoxGeometry(.45,.1,.05),px(0x334488));vi.position.set(0,1.85,.26);g.add(vi);
-const gn=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,.4),px(0x333333));gn.position.set(.42,1,.15);g.add(gn);
-const bg=new THREE.Mesh(new THREE.PlaneGeometry(.7,.07),new THREE.MeshBasicMaterial({color:0x333333,side:THREE.DoubleSide}));bg.position.set(0,2.25,0);bg.name='bg';g.add(bg);
-const fg=new THREE.Mesh(new THREE.PlaneGeometry(.7,.05),new THREE.MeshBasicMaterial({color:0x3498db,side:THREE.DoubleSide}));fg.position.set(0,2.25,.01);fg.name='fg';g.add(fg);
-enableShadows(g);sc.add(g);return g;}
-
 function mkWal(sc){const g=new THREE.Group();
 const ring=new THREE.Mesh(new THREE.TorusGeometry(.55,.035,6,24),new THREE.MeshBasicMaterial({color:0xffd34d,transparent:true,opacity:.72}));ring.rotation.x=Math.PI/2;ring.position.y=.08;g.add(ring);
 const b=new THREE.Mesh(new THREE.BoxGeometry(.58,.38,.38),px(0x7a421f,{roughness:.5}));b.position.set(0,.42,0);g.add(b);
@@ -45,9 +18,6 @@ const l=new THREE.Mesh(new THREE.BoxGeometry(.6,.11,.4),px(0xb9792d,{roughness:.
 const k=new THREE.Mesh(new THREE.BoxGeometry(.1,.12,.045),px(0xffc928,{metalness:.65,roughness:.28}));k.position.set(0,.53,.21);g.add(k);
 const glow=new THREE.PointLight(0xffb52e,1.1,5,2);glow.position.set(0,.7,0);g.add(glow);
 enableShadows(g);sc.add(g);return g;}
-
-function aW(m,t,s){const d=m.userData;if(!d||!d.la)return;const v=Math.sin(t*s*2.5)*.3;d.la.rotation.x=v;d.ra.rotation.x=-v;d.ll.rotation.x=-v*.5;d.rl.rotation.x=v*.5;}
-function aI(m,t){const d=m.userData;if(!d||!d.la)return;d.la.rotation.x=0;d.ra.rotation.x=0;d.ll.rotation.x=0;d.rl.rotation.x=0;if(d.head)d.head.rotation.y=Math.sin(t*.8)*.25;}
 
 function mkGroundTex(){
 const cv=document.createElement('canvas');cv.width=256;cv.height=256;const ctx=cv.getContext('2d');
