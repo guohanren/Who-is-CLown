@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
-import { aI, aW, mkClown, mkCop } from "./characters";
+import { aI, aW, mkClown, mkCop, setHealthBarVisibility } from "./characters";
+import { clearNavigation, moveAgent } from "./navigation";
 
 const CFG={MAP:60,WALK:4,SPRINT:7,AI:8,TIME:240,RAGE_T:60,AR:3.5,AD:100,ACD:1.2,WHP:50,MHP:200,SENS:.004,PSR:9,PSD:25,PSCD:1.2,PMK:30,WIN_W:5,COL_T:3};
 const BD=[[-8,-8,6,5,8],[8,-10,8,4,6],[-12,8,5,6,5],[10,6,7,4,7],[0,15,10,3,4],[-18,-2,4,5,10],[18,-3,5,4,8],[0,-18,12,3,5],[-22,16,6,4,6],[22,14,5,5,5],[-20,-16,7,3,7],[20,-16,6,4,6]];
@@ -240,6 +241,7 @@ export default function MultiplayerGame({ onBack }) {
       const sp = G.fS(6);
       const m = msg.role === 'clown' ? mkClown(G.sc) : mkCop(G.sc);
       m.position.set(sp.x, 0, sp.z);
+      setHealthBarVisibility(m, G.role === 'police' && msg.role === 'police');
       // 不加名字标签，避免暴露身份
       G.otherPlayers[msg.id] = { m, p: new THREE.Vector3(sp.x, 0, sp.z), role: msg.role, hp: 100, name: msg.name, alive: true };
       G.af('👤 有玩家加入了游戏', '#48f');
@@ -248,11 +250,16 @@ export default function MultiplayerGame({ onBack }) {
     if (msg.type === 'pos') {
       const op = G.otherPlayers[msg.id];
       if (op && op.alive) {
+        if (op.role !== msg.role) {
+          G.sc.remove(op.m);
+          op.m = msg.role === 'clown' ? mkClown(G.sc) : mkCop(G.sc);
+        }
         op.p.set(msg.x, 0, msg.z);
         op.m.position.set(msg.x, 0, msg.z);
         op.m.rotation.y = msg.yaw;
         op.role = msg.role;
         op.hp = msg.hp;
+        setHealthBarVisibility(op.m, G.role === 'police' && op.role === 'police');
         aW(op.m, G.gameT, 2);
       }
     }
@@ -334,7 +341,13 @@ export default function MultiplayerGame({ onBack }) {
 
     if (msg.type === 'respawn') {
       const op = G.otherPlayers[msg.id];
-      if (op) { op.alive = true; op.role = 'police'; op.hp = 50; op.m.visible = true; }
+      if (op) {
+        if (op.role !== 'police') {
+          const oldPosition=op.p.clone();G.sc.remove(op.m);op.m=mkCop(G.sc);op.m.position.copy(oldPosition);
+        }
+        op.alive = true; op.role = 'police'; op.hp = 50; op.m.visible = true;
+        setHealthBarVisibility(op.m, G.role === 'police');
+      }
     }
 
     if (msg.type === 'leave') {
@@ -402,6 +415,9 @@ export default function MultiplayerGame({ onBack }) {
       for (let i = 0; i < 100; i++) { const x = (Math.random() - .5) * h * 2, z = (Math.random() - .5) * h * 2; if (!inB(x, z) && (!mr || Math.sqrt(x * x + z * z) > mr)) return { x, z }; }
       return { x: 2, z: 2 };
     }
+    function navMove(agent,target,speed,dt,neighbors=[]){
+      return moveAgent(agent,target,speed,dt,bx,CFG.MAP/2-1,{neighbors,separationDistance:1.05});
+    }
 
     // AI小丑（仅游荡，不抢钱包不攻击）
     const ais = [];
@@ -427,6 +443,7 @@ export default function MultiplayerGame({ onBack }) {
       const sp = fS(6);
       const m = op.role === 'clown' ? mkClown(sc) : mkCop(sc);
       m.position.set(op.x || sp.x, 0, op.z || sp.z);
+      setHealthBarVisibility(m, myRole === 'police' && op.role === 'police');
       otherPlayers[op.id] = { m, p: new THREE.Vector3(op.x || sp.x, 0, op.z || sp.z), role: op.role, hp: op.hp || 100, name: op.name, alive: op.alive !== false };
     });
 
@@ -460,23 +477,39 @@ export default function MultiplayerGame({ onBack }) {
       c.behT -= dt;
       const now = G.gameT;
       if (c.behT <= 0) {
-        const r = Math.random();
-        if (r < .2) { c.beh = 'idle'; c.behT = 1 + Math.random() * 2; c.t = null; }
-        else if (r < .6) { c.beh = 'wander'; c.behT = 2 + Math.random() * 4; const s2 = fS(0); c.t = new THREE.Vector3(s2.x, 0, s2.z); }
-        else if (r < .8) { c.beh = 'zigzag'; c.behT = 2 + Math.random() * 3; const s2 = fS(0); c.t = new THREE.Vector3(s2.x, 0, s2.z); c.zigAmp = Math.random() * .5 + .2; c.zigFreq = 2 + Math.random() * 3; }
-        else { c.beh = 'lookaround'; c.behT = 1.5 + Math.random() * 2; c.lookDir = c.m.rotation.y + (Math.random() - .5) * Math.PI; c.t = null; }
+        const r = Math.random();c.followTarget=null;c.inspectTarget=null;clearNavigation(c);
+        if (r < .18) { c.beh = 'idle'; c.behT = 1 + Math.random() * 2; c.t = null; }
+        else if (r < .5) { c.beh = 'wander'; c.behT = 2 + Math.random() * 4; const s2 = fS(0); c.t = new THREE.Vector3(s2.x, 0, s2.z); }
+        else if (r < .65) { c.beh = 'zigzag'; c.behT = 2 + Math.random() * 3; const s2 = fS(0); c.t = new THREE.Vector3(s2.x, 0, s2.z); }
+        else if (r < .78) { c.beh = 'lookaround'; c.behT = 1.5 + Math.random() * 2; c.lookDir = c.m.rotation.y + (Math.random() - .5) * Math.PI; c.t = null; }
+        else if(r<.9){
+          const peers=ais.filter(a=>a.a&&a!==c&&c.p.distanceTo(a.p)>1.5);
+          c.followTarget=peers.length?peers[Math.floor(Math.random()*peers.length)]:null;
+          c.beh=c.followTarget?'mingle':'idle';c.behT=2+Math.random()*3;
+        }else{
+          const available=wals.filter(w=>!w.tk);
+          c.inspectTarget=available.length?available[Math.floor(Math.random()*available.length)]:null;
+          c.beh=c.inspectTarget?'inspect_wallet':'idle';c.behT=3+Math.random()*2;
+        }
       }
-      if (c.beh === 'idle') { aI(c.m, now + c.phase); }
-      else if (c.beh === 'lookaround') { c.m.rotation.y += (c.lookDir - c.m.rotation.y) * 2 * dt; aI(c.m, now + c.phase); }
-      else if (c.beh === 'wander' || c.beh === 'zigzag') {
-        if (!c.t || c.p.distanceTo(c.t) < 1.5) { c.beh = 'idle'; c.behT = .5 + Math.random(); return; }
-        const d = new THREE.Vector3().subVectors(c.t, c.p).normalize();
-        if (c.beh === 'zigzag') { const pp = new THREE.Vector3(-d.z, 0, d.x); d.x += pp.x * Math.sin(now * c.zigFreq + c.phase) * c.zigAmp; d.z += pp.z * Math.sin(now * c.zigFreq + c.phase) * c.zigAmp; d.normalize(); }
-        const sp = c.sp;
-        c.p.x += d.x * sp * dt; c.p.z += d.z * sp * dt;
-        rC(c.p);
-        c.m.position.copy(c.p); c.m.rotation.y = Math.atan2(d.x, d.z);
-        aW(c.m, now + c.phase, sp);
+      const turn=(x,z)=>{if(!x&&!z)return;const target=Math.atan2(x,z);let delta=target-c.m.rotation.y;while(delta>Math.PI)delta-=Math.PI*2;while(delta<-Math.PI)delta+=Math.PI*2;c.m.rotation.y+=delta*Math.min(1,dt*7);};
+      const move=(target,speed)=>{
+        const result=navMove(c,target,speed,dt,ais);c.m.position.copy(c.p);
+        if(result.moved){turn(result.x,result.z);aW(c.m,now+c.phase,speed);}else aI(c.m,now+c.phase);
+      };
+      if (c.beh === 'idle') aI(c.m, now + c.phase);
+      else if (c.beh === 'lookaround') { turn(Math.sin(c.lookDir),Math.cos(c.lookDir));aI(c.m, now + c.phase); }
+      else if(c.beh==='mingle'){
+        if(!c.followTarget||!c.followTarget.a){c.beh='idle';c.behT=.5;}
+        else if(c.p.distanceTo(c.followTarget.p)<1.35){turn(c.followTarget.p.x-c.p.x,c.followTarget.p.z-c.p.z);aI(c.m,now+c.phase);}
+        else move(c.followTarget.p,c.sp);
+      }else if(c.beh==='inspect_wallet'){
+        if(!c.inspectTarget||c.inspectTarget.tk){c.beh='idle';c.behT=.5;}
+        else if(c.p.distanceTo(c.inspectTarget.p)<2.1){turn(c.inspectTarget.p.x-c.p.x,c.inspectTarget.p.z-c.p.z);aI(c.m,now+c.phase);}
+        else move(c.inspectTarget.p,c.sp*.85);
+      }else if (c.beh === 'wander' || c.beh === 'zigzag') {
+        if (!c.t || c.p.distanceTo(c.t) < 1.25) { c.beh = 'idle'; c.behT = .5 + Math.random();clearNavigation(c);return; }
+        move(c.t,c.sp);
       }
     }
 
@@ -544,6 +577,14 @@ export default function MultiplayerGame({ onBack }) {
 
       // AI更新
       ais.forEach(c => uAI(c, dt));
+      Object.values(otherPlayers).forEach(op=>{
+        const visible=op.alive&&G.role==='police'&&op.role==='police';
+        setHealthBarVisibility(op.m,visible);
+        if(!visible)return;
+        const fg=op.m.getObjectByName('fg'),bg=op.m.getObjectByName('bg');
+        if(fg){const ratio=Math.max(0,Math.min(1,op.hp/100));fg.scale.x=Math.max(.01,ratio);fg.position.x=-(1-ratio)*.35;fg.lookAt(cam.position);}
+        if(bg)bg.lookAt(cam.position);
+      });
 
       // 击中特效衰减
       if (G.hitFlash.alpha > 0) G.hitFlash.alpha = Math.max(0, G.hitFlash.alpha - dt * 1.2);

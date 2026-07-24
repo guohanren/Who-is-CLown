@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
-import { aI, aW, mkClown, mkCop } from "./characters";
+import { aI, aW, mkClown, mkCop, setHealthBarVisibility } from "./characters";
 import { createCombatFx, createFirstPersonWeapons, createGameAudio } from "./fpsPresentation";
+import { clearNavigation, hasLineOfSight, moveAgent } from "./navigation";
 
 const CFG={MAP:60,WALK:4,SPRINT:7,AI:10,COPS:3,WIN_W:5,COL_T:3,TIME:240,RAGE_T:60,PV:12,PA:Math.PI*.55,PC:5,PP:2.5,PSR:9,PSD:20,PSCD:1.2,PMK:30,AR:3.5,AD:100,ACD:.8,WHP:50,MHP:200,SENS:.004};
 const BD=[[-8,-8,6,5,8],[8,-10,8,4,6],[-12,8,5,6,5],[10,6,7,4,7],[0,15,10,3,4],[-18,-2,4,5,10],[18,-3,5,4,8],[0,-18,12,3,5],[-22,16,6,4,6],[22,14,5,5,5],[-20,-16,7,3,7],[20,-16,6,4,6]];
@@ -102,9 +103,10 @@ const weapons=createFirstPersonWeapons(cam),pfx=createCombatFx(sc),audio=createG
 function inB(x,z){return bx.some(v=>x>v.x1&&x<v.x2&&z>v.z1&&z<v.z2);}
 function rC(p){for(const b of bx){if(p.x>b.x1&&p.x<b.x2&&p.z>b.z1&&p.z<b.z2){const d=[p.x-b.x1,b.x2-p.x,p.z-b.z1,b.z2-p.z],n=Math.min(...d),i=d.indexOf(n);if(i===0)p.x=b.x1;else if(i===1)p.x=b.x2;else if(i===2)p.z=b.z1;else p.z=b.z2;}}const h=CFG.MAP/2-1;p.x=Math.max(-h,Math.min(h,p.x));p.z=Math.max(-h,Math.min(h,p.z));}
 function fS(mr){const h=CFG.MAP/2-3;for(let i=0;i<100;i++){const x=(Math.random()-.5)*h*2,z=(Math.random()-.5)*h*2;if(!inB(x,z)&&(!mr||Math.sqrt(x*x+z*z)>mr))return{x,z};}return{x:2,z:2};}
+function navMove(agent,target,speed,dt,neighbors=[]){return moveAgent(agent,target,speed,dt,bx,CFG.MAP/2-1,{neighbors,separationDistance:1.05});}
 
 const ais=[];for(let i=0;i<CFG.AI;i++){const s=fS(0);const m=mkClown(sc);m.position.set(s.x,0,s.z);ais.push({m,p:new THREE.Vector3(s.x,0,s.z),t:null,sp:1+Math.random()*1.2,w:Math.random()*3,a:true,beh:'wander',behT:2,lookDir:0,zigAmp:.3,zigFreq:3,phase:Math.random()*Math.PI*2,isReal:i<3,capProg:0,capTarget:null,chp:i<3?100:30,atkCop:null});}
-const cops=[];for(let i=0;i<CFG.COPS;i++){const s=fS(12);const m=mkCop(sc);m.position.set(s.x,0,s.z);const wp=[];for(let j=0;j<4;j++){const q=fS(4);wp.push(new THREE.Vector3(q.x,0,q.z));}cops.push({m,p:new THREE.Vector3(s.x,0,s.z),r:0,hp:100,mhp:100,st:'patrol',wp,wi:0,cd:0,a:true,su:0,nm:CN[i],huntTarget:null,huntCD:0});}
+const cops=[];for(let i=0;i<CFG.COPS;i++){const s=fS(12);const m=mkCop(sc);m.position.set(s.x,0,s.z);const wp=[];for(let j=0;j<4;j++){const q=fS(4);wp.push(new THREE.Vector3(q.x,0,q.z));}cops.push({m,p:new THREE.Vector3(s.x,0,s.z),r:0,hp:100,mhp:100,st:'patrol',wp,wi:0,cd:0,a:true,su:0,nm:CN[i],huntTarget:null,huntCD:0,lastSeen:null,searchT:0,guardTarget:null,guardT:0});}
 const wals=[];WP.forEach(([wx,wz])=>{let x=wx,z=wz;if(inB(x,z)){const s=fS(4);x=s.x;z=s.z;}const m=mkWal(sc);m.position.set(x,0,z);wals.push({m,p:new THREE.Vector3(x,0,z),tk:false});});
 
 const feed=[];function af(msg,col){feed.push({msg,col,t:4});if(feed.length>5)feed.shift();}
@@ -114,16 +116,40 @@ gRef.current=G;G.clk.start();setErr("");
 function pickWT(c){const o=wals.filter(w=>!w.tk);if(!o.length)return null;let b=null,bd=Infinity;o.forEach(w=>{const d=c.p.distanceTo(w.p);if(d<bd){bd=d;b=w;}});return b;}
 function pickCT(c){const a=cops.filter(p=>p.a);if(!a.length)return null;let b=null,bd=Infinity;a.forEach(p=>{const d=c.p.distanceTo(p.p);if(d<bd){bd=d;b=p;}});return b;}
 
-function uAI(c,dt){if(!c.a)return;c.behT-=dt;
-if(c.isReal&&c.beh!=='steal'&&c.beh!=='capturing'&&c.beh!=='hunt_cop'&&c.behT<=0){const r=Math.random(),sc2=.15,ac=.10;if(r<sc2){const wt=pickWT(c);if(wt){c.beh='steal';c.behT=15;c.t=wt.p.clone();c.capTarget=wt;c.capProg=0;}}else if(r<sc2+ac){const ct2=pickCT(c);if(ct2){c.beh='hunt_cop';c.behT=10;c.atkCop=ct2;}}}
-if(c.behT<=0&&c.beh!=='capturing'&&c.beh!=='hunt_cop'){const r=Math.random();if(r<.25){c.beh='idle';c.behT=1+Math.random()*3;c.t=null;}else if(r<.55){c.beh='wander';c.behT=2+Math.random()*4;const s2=fS(0);c.t=new THREE.Vector3(s2.x,0,s2.z);}else if(r<.75){c.beh='zigzag';c.behT=2+Math.random()*3;const s2=fS(0);c.t=new THREE.Vector3(s2.x,0,s2.z);c.zigAmp=Math.random()*.6+.2;c.zigFreq=2+Math.random()*4;}else{c.beh='lookaround';c.behT=1.5+Math.random()*2;c.lookDir=c.m.rotation.y+(Math.random()-.5)*Math.PI;c.t=null;}}
-const now=G.gameT;
+function turnAgent(agent,x,z,dt){if(!x&&!z)return;const target=Math.atan2(x,z);let delta=target-agent.m.rotation.y;while(delta>Math.PI)delta-=Math.PI*2;while(delta<-Math.PI)delta+=Math.PI*2;agent.m.rotation.y+=delta*Math.min(1,dt*7);if('r'in agent)agent.r=agent.m.rotation.y;}
+function applyMove(agent,result,speed,time,dt){agent.m.position.copy(agent.p);if(result.moved){turnAgent(agent,result.x,result.z,dt);aW(agent.m,time,speed);}else aI(agent.m,time);}
+
+function uAI(c,dt){
+if(!c.a)return;c.behT-=dt;const now=G.gameT;
+
+// Real clowns retreat when a visible police officer gets dangerously close.
+if(c.isReal&&!['capturing','hunt_cop','flee_cop'].includes(c.beh)){
+const threat=pickCT(c);if(threat&&c.p.distanceTo(threat.p)<4.2&&hasLineOfSight(c.p,threat.p,bx,.1)){const dx=c.p.x-threat.p.x,dz=c.p.z-threat.p.z,l=Math.hypot(dx,dz)||1;c.beh='flee_cop';c.behT=2.2;c.t=new THREE.Vector3(c.p.x+dx/l*7,0,c.p.z+dz/l*7);clearNavigation(c);}}
+
+if(c.isReal&&!['steal','capturing','hunt_cop','flee_cop'].includes(c.beh)&&c.behT<=0){const r=Math.random();if(r<.17){const wt=pickWT(c);if(wt){c.beh='steal';c.behT=15;c.t=wt.p.clone();c.capTarget=wt;c.capProg=0;clearNavigation(c);}}else if(r<.27){const ct2=pickCT(c);if(ct2){c.beh='hunt_cop';c.behT=10;c.atkCop=ct2;clearNavigation(c);}}}
+
+if(c.behT<=0&&!['capturing','hunt_cop'].includes(c.beh)){
+const r=Math.random();c.followTarget=null;c.inspectTarget=null;clearNavigation(c);
+if(r<.2){c.beh='idle';c.behT=1+Math.random()*2.5;c.t=null;}
+else if(r<.48){c.beh='wander';c.behT=3+Math.random()*4;const s=fS(0);c.t=new THREE.Vector3(s.x,0,s.z);}
+else if(r<.63){c.beh='zigzag';c.behT=2.5+Math.random()*3;const s=fS(0);c.t=new THREE.Vector3(s.x,0,s.z);}
+else if(r<.77){c.beh='lookaround';c.behT=1.5+Math.random()*2;c.lookDir=c.m.rotation.y+(Math.random()-.5)*Math.PI;c.t=null;}
+else if(r<.9){const peers=ais.filter(a=>a.a&&a!==c&&c.p.distanceTo(a.p)>1.6);c.followTarget=peers.length?peers[Math.floor(Math.random()*peers.length)]:null;c.beh=c.followTarget?'mingle':'idle';c.behT=2+Math.random()*3;}
+else{c.inspectTarget=pickWT(c);c.beh=c.inspectTarget?'inspect_wallet':'idle';c.behT=3+Math.random()*3;}}
+
 if(c.beh==='capturing'){if(!c.capTarget||c.capTarget.tk){c.beh='idle';c.behT=1;return;}c.capProg+=dt;aI(c.m,now+c.phase);if(c.capProg>=CFG.COL_T){c.capTarget.tk=true;c.capTarget.m.visible=false;G.wc++;c.capProg=0;c.capTarget=null;c.beh='idle';c.behT=1+Math.random()*2;af('💰 小丑占领钱包 ['+G.wc+'/'+CFG.WIN_W+']','#cc8800');G.al='⚠️ 钱包被占！';G.at=2;}return;}
-if(c.beh==='steal'){if(!c.capTarget||c.capTarget.tk){c.beh='idle';c.behT=1;return;}if(c.p.distanceTo(c.capTarget.p)<1.8){c.beh='capturing';c.capProg=0;return;}const d=new THREE.Vector3().subVectors(c.capTarget.p,c.p).normalize();const pp=new THREE.Vector3(-d.z,0,d.x);d.x+=pp.x*Math.sin(now*2+c.phase)*.15;d.z+=pp.z*Math.sin(now*2+c.phase)*.15;d.normalize();const sp=c.sp*1.1,ox=c.p.x,oz=c.p.z;c.p.x+=d.x*sp*dt;c.p.z+=d.z*sp*dt;rC(c.p);if(Math.abs(c.p.x-ox)+Math.abs(c.p.z-oz)<.005){c.stuckT=(c.stuckT||0)+dt;if(c.stuckT>.8){c.beh='wander';c.behT=2;const s2=fS(0);c.t=new THREE.Vector3(s2.x,0,s2.z);c.stuckT=0;}}else c.stuckT=0;c.m.position.copy(c.p);c.m.rotation.y=Math.atan2(d.x,d.z);aW(c.m,now+c.phase,sp);return;}
-if(c.beh==='hunt_cop'){if(!c.atkCop||!c.atkCop.a){c.beh='idle';c.behT=1;c.atkCop=null;return;}const dist=c.p.distanceTo(c.atkCop.p);if(dist<2){c.atkCop.hp=0;c.atkCop.a=false;c.atkCop.m.visible=false;af('🤡💀 小丑击杀 '+c.atkCop.nm+'！','#ff4757');G.al='💀 '+c.atkCop.nm+' 被击杀！';G.at=2;c.atkCop=null;c.beh='idle';c.behT=1+Math.random()*2;return;}const d=new THREE.Vector3().subVectors(c.atkCop.p,c.p).normalize();const pp=new THREE.Vector3(-d.z,0,d.x);d.x+=pp.x*Math.sin(now*1.8+c.phase)*.2;d.z+=pp.z*Math.sin(now*1.8+c.phase)*.2;d.normalize();const sp=c.sp*1.3,ox=c.p.x,oz=c.p.z;c.p.x+=d.x*sp*dt;c.p.z+=d.z*sp*dt;rC(c.p);if(Math.abs(c.p.x-ox)+Math.abs(c.p.z-oz)<.005){c.stuckT=(c.stuckT||0)+dt;if(c.stuckT>.8){c.beh='wander';c.behT=2;c.stuckT=0;}}else c.stuckT=0;c.m.position.copy(c.p);c.m.rotation.y=Math.atan2(d.x,d.z);aW(c.m,now+c.phase,sp);return;}
+
+if(c.beh==='steal'){if(!c.capTarget||c.capTarget.tk){c.beh='idle';c.behT=1;return;}if(c.p.distanceTo(c.capTarget.p)<1.8){c.beh='capturing';c.capProg=0;clearNavigation(c);return;}const speed=c.sp*1.1;applyMove(c,navMove(c,c.capTarget.p,speed,dt,ais),speed,now+c.phase,dt);return;}
+
+if(c.beh==='hunt_cop'){if(!c.atkCop||!c.atkCop.a){c.beh='idle';c.behT=1;c.atkCop=null;return;}if(c.p.distanceTo(c.atkCop.p)<2){c.atkCop.hp=0;c.atkCop.a=false;c.atkCop.m.visible=false;af('🤡💀 小丑击杀 '+c.atkCop.nm+'！','#ff4757');G.al='💀 '+c.atkCop.nm+' 被击杀！';G.at=2;c.atkCop=null;c.beh='idle';c.behT=1+Math.random()*2;return;}const speed=c.sp*1.3;applyMove(c,navMove(c,c.atkCop.p,speed,dt,ais),speed,now+c.phase,dt);return;}
+
+if(c.beh==='mingle'){if(!c.followTarget||!c.followTarget.a){c.beh='idle';c.behT=.5;return;}if(c.p.distanceTo(c.followTarget.p)<1.35){turnAgent(c,c.followTarget.p.x-c.p.x,c.followTarget.p.z-c.p.z,dt);aI(c.m,now+c.phase);return;}applyMove(c,navMove(c,c.followTarget.p,c.sp,dt,ais),c.sp,now+c.phase,dt);return;}
+
+if(c.beh==='inspect_wallet'){if(!c.inspectTarget||c.inspectTarget.tk){c.beh='idle';c.behT=.5;return;}if(c.p.distanceTo(c.inspectTarget.p)<2.15){turnAgent(c,c.inspectTarget.p.x-c.p.x,c.inspectTarget.p.z-c.p.z,dt);aI(c.m,now+c.phase);return;}applyMove(c,navMove(c,c.inspectTarget.p,c.sp*.85,dt,ais),c.sp*.85,now+c.phase,dt);return;}
+
 if(c.beh==='idle'){aI(c.m,now+c.phase);if(c.m.userData.head)c.m.userData.head.rotation.y=Math.sin(now*.7+c.phase)*.4;}
-else if(c.beh==='lookaround'){c.m.rotation.y+=(c.lookDir-c.m.rotation.y)*2*dt;aI(c.m,now+c.phase);}
-else if(c.beh==='wander'||c.beh==='zigzag'){if(!c.t||c.p.distanceTo(c.t)<1.5){c.beh='idle';c.behT=.5+Math.random();return;}const ox=c.p.x,oz=c.p.z,d=new THREE.Vector3().subVectors(c.t,c.p).normalize();let sp=G.rage?c.sp*1.5:c.sp;if(c.beh==='zigzag'){const pp=new THREE.Vector3(-d.z,0,d.x);d.x+=pp.x*Math.sin(now*c.zigFreq+c.phase)*c.zigAmp;d.z+=pp.z*Math.sin(now*c.zigFreq+c.phase)*c.zigAmp;d.normalize();}c.p.x+=d.x*sp*dt;c.p.z+=d.z*sp*dt;rC(c.p);if(Math.abs(c.p.x-ox)+Math.abs(c.p.z-oz)<.005){c.stuckT=(c.stuckT||0)+dt;if(c.stuckT>.5){const s2=fS(0);c.t=new THREE.Vector3(s2.x,0,s2.z);c.stuckT=0;c.beh='wander';c.behT=2+Math.random()*3;}}else c.stuckT=0;c.m.position.copy(c.p);c.m.rotation.y=Math.atan2(d.x,d.z);aW(c.m,now+c.phase,sp);}}
+else if(c.beh==='lookaround'){turnAgent(c,Math.sin(c.lookDir),Math.cos(c.lookDir),dt);aI(c.m,now+c.phase);}
+else if(['wander','zigzag','flee_cop'].includes(c.beh)){if(!c.t||c.p.distanceTo(c.t)<1.15){c.beh='idle';c.behT=.5+Math.random();clearNavigation(c);return;}const speed=(G.rage?c.sp*1.45:c.sp)*(c.beh==='flee_cop'?1.35:1);applyMove(c,navMove(c,c.t,speed,dt,ais),speed,now+c.phase,dt);}}
 
 function drawMM(){const cv=mmRef.current;if(!cv)return;try{const ctx=cv.getContext('2d'),S=100,M=CFG.MAP,s=S/M;ctx.fillStyle='#7CB86B';ctx.fillRect(0,0,S,S);ctx.fillStyle='#888';BD.forEach(([x,z,w,,d])=>{ctx.fillRect((x-w/2+M/2)*s,(z-d/2+M/2)*s,w*s,d*s);});wals.forEach(w=>{const wx=(w.p.x+M/2)*s,wz=(w.p.z+M/2)*s;if(w.tk){ctx.fillStyle='rgba(218,165,32,.3)';ctx.fillRect(wx-3,wz-3,6,6);ctx.strokeStyle='#8B6914';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(wx-2,wz-2);ctx.lineTo(wx+2,wz+2);ctx.moveTo(wx+2,wz-2);ctx.lineTo(wx-2,wz+2);ctx.stroke();}else{ctx.fillStyle='#DAA520';ctx.fillRect(wx-3,wz-3,6,6);ctx.strokeStyle='#8B6914';ctx.lineWidth=1;ctx.strokeRect(wx-3,wz-3,6,6);}});const ppx=(G.pos.x+M/2)*s,pz=(G.pos.z+M/2)*s;ctx.fillStyle=G.role==='clown'?'#0c6':'#49d';ctx.fillRect(ppx-3,pz-3,6,6);ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(ppx,pz);ctx.lineTo(ppx-Math.sin(G.yaw)*9,pz-Math.cos(G.yaw)*9);ctx.stroke();}catch(e){}}
 
@@ -139,16 +165,97 @@ G.stepT-=dt;if(moving&&G.stepT<=0){G.audio.step();G.stepT=G.spr ? .27 : .42;}
 G.weapons.update(dt,{role:G.role,moving,sprinting:G.spr,time:G.gameT,reloading:G.reloadT>0});G.pfx.update(dt);
 if(G.role==='clown'){if(G.col){if(G.pos.distanceTo(G.col.p)>2.5){G.col=null;G.cp=0;}else{G.cp+=dt;if(G.cp>=CFG.COL_T){G.col.tk=true;G.col.m.visible=false;G.wc++;G.pfx.pickup(G.col.p);G.audio.pickup();G.col=null;G.cp=0;G.hp=Math.min(CFG.MHP,G.hp+CFG.WHP);G.mhp=Math.max(G.mhp,G.hp);G.al='💰 +1！';G.at=2;af('💰 占领钱包 ['+G.wc+'/'+CFG.WIN_W+']','#cc8800');}}}else{for(const w of wals){if(!w.tk&&G.pos.distanceTo(w.p)<2){G.col=w;G.cp=0;break;}}}}
 ais.forEach(c=>uAI(c,dt));
-cops.forEach(p=>{if(!p.a)return;p.cd=Math.max(0,p.cd-dt);p.huntCD=(p.huntCD||0)-dt;
-const fg=p.m.getObjectByName('fg');if(fg){const r2=p.hp/p.mhp;fg.scale.x=Math.max(.01,r2);fg.position.x=-(1-r2)*.35;}const bg=p.m.getObjectByName('bg');if(bg)bg.lookAt(cam.position);if(fg)fg.lookAt(cam.position);
-const dist=p.p.distanceTo(G.pos),dirP=new THREE.Vector3().subVectors(G.pos,p.p).normalize(),fa=Math.atan2(dirP.x,dirP.z);let ad=fa-p.r;while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;const seeP=dist<CFG.PV&&Math.abs(ad)<CFG.PA/2;
-if(G.role==='police'&&(p.st==='chase'||p.st==='sus'))p.st='patrol';
-if(p.st==='patrol'&&p.huntCD<=0&&!p.huntTarget){p.huntCD=2+Math.random()*3;let bC=null,bD=Infinity;ais.forEach(c=>{if(!c.a)return;const cd=p.p.distanceTo(c.p);if(cd<CFG.PV*.9){const dc=new THREE.Vector3().subVectors(c.p,p.p).normalize(),fac=Math.atan2(dc.x,dc.z);let adc=fac-p.r;while(adc>Math.PI)adc-=Math.PI*2;while(adc<-Math.PI)adc+=Math.PI*2;if(Math.abs(adc)<CFG.PA/2&&cd<bD){bD=cd;bC=c;}}});if(bC){const iS=bC.isReal&&(bC.beh==='steal'||bC.beh==='capturing'||bC.beh==='hunt_cop');if(Math.random()<(iS?.7:.15)){p.huntTarget=bC;p.st='hunt_clown';}}}
-if(p.st==='patrol'){if(G.role==='clown'&&seeP&&G.spr&&dist<CFG.PV*.8){p.st='chase';G.al='⚠️ 被发现！';G.at=2;af('⚠️ '+p.nm+' 发现你！','#e74c3c');}else if(G.role==='clown'&&seeP&&G.col&&dist<CFG.PV*.6){p.st='sus';p.su=2;}else{const wp=p.wp[p.wi];if(p.p.distanceTo(wp)<2)p.wi=(p.wi+1)%p.wp.length;const ox=p.p.x,oz=p.p.z,d2=new THREE.Vector3().subVectors(wp,p.p).normalize();p.p.x+=d2.x*CFG.PP*dt;p.p.z+=d2.z*CFG.PP*dt;p.r=Math.atan2(d2.x,d2.z);rC(p.p);if(Math.abs(p.p.x-ox)+Math.abs(p.p.z-oz)<.005){p.stk=(p.stk||0)+dt;if(p.stk>.5){p.wi=(p.wi+1)%p.wp.length;p.stk=0;}}else p.stk=0;aW(p.m,G.gameT,CFG.PP);}}
-else if(p.st==='sus'){p.su-=dt;p.r+=(fa-p.r)*3*dt;if(seeP&&(G.spr||G.col)){p.st='chase';G.al='⚠️ 锁定！';G.at=2;}if(p.su<=0)p.st='patrol';aI(p.m,G.gameT);}
-else if(p.st==='chase'){if(G.role==='police'){p.st='patrol';}else{const cd2=new THREE.Vector3().subVectors(G.pos,p.p).normalize();p.p.x+=cd2.x*CFG.PC*dt;p.p.z+=cd2.z*CFG.PC*dt;p.r=Math.atan2(cd2.x,cd2.z);if(dist<CFG.PSR&&p.cd<=0){G.hp-=CFG.PSD;p.cd=CFG.PSCD;G.hitFlash=1;G.shake=.22;G.audio.hurt();G.al='💥 击中！';G.at=1.5;af('🔫 '+p.nm+' 击中你','#e74c3c');}if(dist>CFG.PV*1.5)p.st='patrol';aW(p.m,G.gameT,CFG.PC);}}
-else if(p.st==='hunt_clown'){if(!p.huntTarget||!p.huntTarget.a){p.huntTarget=null;p.st='patrol';}else{const ht=p.huntTarget,hD=p.p.distanceTo(ht.p),hDir=new THREE.Vector3().subVectors(ht.p,p.p).normalize();p.p.x+=hDir.x*CFG.PC*.9*dt;p.p.z+=hDir.z*CFG.PC*.9*dt;p.r=Math.atan2(hDir.x,hDir.z);if(hD<CFG.PSR&&p.cd<=0){p.cd=CFG.PSCD;if(ht.isReal){ht.chp=(ht.chp===undefined?100:ht.chp);ht.chp-=50;if(ht.chp<=0){ht.a=false;ht.m.visible=false;af('👮 '+p.nm+' 击杀真小丑！','#2ed573');}else af('👮 '+p.nm+' 命中目标','#ffa502');p.huntTarget=null;p.st='patrol';}else{ht.a=false;ht.m.visible=false;p.hp-=CFG.PMK;af('👮 '+p.nm+' 误杀AI [-'+CFG.PMK+']','#e74c3c');if(p.hp<=0){p.a=false;p.m.visible=false;af('💀 '+p.nm+' 误杀阵亡！','#ff4757');}p.huntTarget=null;p.st='patrol';}}if(hD>CFG.PV*1.8){p.huntTarget=null;p.st='patrol';}rC(p.p);aW(p.m,G.gameT,CFG.PC*.9);}}
-rC(p.p);p.m.position.copy(p.p);p.m.rotation.y=p.r;});
+cops.forEach(p=>{
+if(!p.a){setHealthBarVisibility(p.m,false);return;}
+p.cd=Math.max(0,p.cd-dt);p.huntCD=(p.huntCD||0)-dt;
+const showHealth=G.role==='police';setHealthBarVisibility(p.m,showHealth);
+const fg=p.m.getObjectByName('fg'),bg=p.m.getObjectByName('bg');
+if(fg){const ratio=p.hp/p.mhp;fg.scale.x=Math.max(.01,ratio);fg.position.x=-(1-ratio)*.35;}
+if(showHealth&&bg)bg.lookAt(cam.position);if(showHealth&&fg)fg.lookAt(cam.position);
+
+const dist=p.p.distanceTo(G.pos),dirP=new THREE.Vector3().subVectors(G.pos,p.p).normalize(),fa=Math.atan2(dirP.x,dirP.z);
+let ad=fa-p.m.rotation.y;while(ad>Math.PI)ad-=Math.PI*2;while(ad<-Math.PI)ad+=Math.PI*2;
+const seeP=dist<CFG.PV&&Math.abs(ad)<CFG.PA/2&&hasLineOfSight(p.p,G.pos,bx,.08);
+const beginChase=()=>{
+  p.st='chase';p.lastSeen=G.pos.clone();p.searchT=3.5;clearNavigation(p);
+  G.al='⚠️ 被发现！';G.at=2;af('⚠️ '+p.nm+' 发现你！','#e74c3c');
+};
+const resumePatrol=()=>{p.st='patrol';p.huntTarget=null;p.guardTarget=null;p.lastSeen=null;clearNavigation(p);};
+
+if(G.role==='police'&&(p.st==='chase'||p.st==='sus'))resumePatrol();
+
+if(p.st==='patrol'&&p.huntCD<=0&&!p.huntTarget){
+  p.huntCD=2+Math.random()*3;let targetClown=null,bestDist=Infinity;
+  ais.forEach(c=>{
+    if(!c.a)return;
+    const cd=p.p.distanceTo(c.p),dc=new THREE.Vector3().subVectors(c.p,p.p).normalize(),fac=Math.atan2(dc.x,dc.z);
+    let adc=fac-p.m.rotation.y;while(adc>Math.PI)adc-=Math.PI*2;while(adc<-Math.PI)adc+=Math.PI*2;
+    if(cd<CFG.PV*.9&&Math.abs(adc)<CFG.PA/2&&hasLineOfSight(p.p,c.p,bx,.08)&&cd<bestDist){bestDist=cd;targetClown=c;}
+  });
+  if(targetClown){
+    const suspicious=targetClown.isReal&&['steal','capturing','hunt_cop','flee_cop'].includes(targetClown.beh);
+    if(Math.random()<(suspicious ? .72 : .12)){p.huntTarget=targetClown;p.st='hunt_clown';p.searchT=3;clearNavigation(p);}
+  }else if(Math.random()<.34){
+    const available=wals.filter(w=>!w.tk);
+    if(available.length){p.guardTarget=available[Math.floor(Math.random()*available.length)];p.guardT=2.5+Math.random()*2.5;p.st='guard_wallet';clearNavigation(p);}
+  }
+}
+
+if(p.st==='patrol'){
+  if(G.role==='clown'&&seeP&&G.spr&&dist<CFG.PV*.85)beginChase();
+  else if(G.role==='clown'&&seeP&&G.col&&dist<CFG.PV*.65){p.st='sus';p.su=1.7;clearNavigation(p);}
+  else{
+    let wp=p.wp[p.wi];if(p.p.distanceTo(wp)<1.5){p.wi=(p.wi+1)%p.wp.length;wp=p.wp[p.wi];clearNavigation(p);}
+    applyMove(p,navMove(p,wp,CFG.PP,dt,cops),CFG.PP,G.gameT,dt);
+  }
+}else if(p.st==='sus'){
+  p.su-=dt;turnAgent(p,dirP.x,dirP.z,dt);aI(p.m,G.gameT);
+  if(seeP&&(G.spr||G.col))beginChase();else if(p.su<=0)resumePatrol();
+}else if(p.st==='chase'){
+  if(G.role==='police')resumePatrol();
+  else{
+    if(seeP){p.lastSeen=G.pos.clone();p.searchT=3.5;}else p.searchT-=dt;
+    if(p.lastSeen){
+      const result=navMove(p,p.lastSeen,CFG.PC,dt,cops);applyMove(p,result,CFG.PC,G.gameT,dt);
+      if(!seeP&&p.p.distanceTo(p.lastSeen)<1.25)p.searchT=Math.min(p.searchT,.45);
+    }else aI(p.m,G.gameT);
+    if(seeP&&dist<CFG.PSR&&p.cd<=0){
+      G.hp-=CFG.PSD;p.cd=CFG.PSCD;G.hitFlash=1;G.shake=.22;G.audio.hurt();G.al='💥 击中！';G.at=1.5;af('🔫 '+p.nm+' 击中你','#e74c3c');
+    }
+    if(p.searchT<=0||dist>CFG.PV*2.2)resumePatrol();
+  }
+}else if(p.st==='guard_wallet'){
+  if(!p.guardTarget||p.guardTarget.tk)resumePatrol();
+  else if(G.role==='clown'&&seeP&&(G.spr||G.col))beginChase();
+  else if(p.p.distanceTo(p.guardTarget.p)>2.4){
+    applyMove(p,navMove(p,p.guardTarget.p,CFG.PP*.9,dt,cops),CFG.PP*.9,G.gameT,dt);
+  }else{
+    p.guardT-=dt;turnAgent(p,Math.sin(G.gameT*.75+p.wi),Math.cos(G.gameT*.75+p.wi),dt);aI(p.m,G.gameT);
+    if(p.guardT<=0)resumePatrol();
+  }
+}else if(p.st==='hunt_clown'){
+  const ht=p.huntTarget;
+  if(!ht||!ht.a)resumePatrol();
+  else{
+    const hD=p.p.distanceTo(ht.p),canSee=hasLineOfSight(p.p,ht.p,bx,.08);
+    if(canSee){p.lastSeen=ht.p.clone();p.searchT=3;}else p.searchT-=dt;
+    if(p.lastSeen)applyMove(p,navMove(p,p.lastSeen,CFG.PC*.9,dt,cops),CFG.PC*.9,G.gameT,dt);
+    if(canSee&&hD<CFG.PSR&&p.cd<=0){
+      p.cd=CFG.PSCD;
+      if(ht.isReal){
+        ht.chp=(ht.chp===undefined?100:ht.chp)-50;
+        if(ht.chp<=0){ht.a=false;ht.m.visible=false;af('👮 '+p.nm+' 击杀真小丑！','#2ed573');}
+        else af('👮 '+p.nm+' 命中目标','#ffa502');
+      }else{
+        ht.a=false;ht.m.visible=false;p.hp-=CFG.PMK;af('👮 '+p.nm+' 误杀AI [-'+CFG.PMK+']','#e74c3c');
+        if(p.hp<=0){p.a=false;p.m.visible=false;setHealthBarVisibility(p.m,false);af('💀 '+p.nm+' 误杀阵亡！','#ff4757');}
+      }
+      resumePatrol();
+    }else if(p.searchT<=0||hD>CFG.PV*2)resumePatrol();
+  }
+}
+p.m.position.copy(p.p);
+});
 wals.forEach(w=>{if(!w.tk){w.m.position.y=Math.sin(Date.now()*.002+w.p.x)*.08;w.m.rotation.y+=.008;}});
 if(!G.rage&&G.tm<=CFG.RAGE_T){G.rage=true;G.al='⚡ 疯狂时刻！';G.at=3;af('⚡ 疯狂时刻！','#ff6b6b');for(let i=0;i<8;i++){const s2=fS(0);const m2=mkClown(sc);m2.position.set(s2.x,0,s2.z);ais.push({m:m2,p:new THREE.Vector3(s2.x,0,s2.z),t:null,sp:2.5+Math.random()*1.5,w:0,a:true,beh:'zigzag',behT:3+Math.random()*3,lookDir:0,zigAmp:.5,zigFreq:3+Math.random()*3,phase:Math.random()*Math.PI*2,isReal:i<3,capProg:0,capTarget:null,chp:i<3?100:30,atkCop:null});}}
 if(G.at>0){G.at-=dt;if(G.at<=0)G.al='';}for(let i=feed.length-1;i>=0;i--){feed[i].t-=dt;if(feed[i].t<=0)feed.splice(i,1);}

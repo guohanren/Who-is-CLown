@@ -106,6 +106,7 @@ function addCopHealthBar(root) {
   bg.position.set(0, 2.42, 0)
   bg.name = 'bg'
   bg.renderOrder = 20
+  bg.visible = false
   root.add(bg)
 
   const fg = new THREE.Mesh(
@@ -115,7 +116,15 @@ function addCopHealthBar(root) {
   fg.position.set(0, 2.42, .006)
   fg.name = 'fg'
   fg.renderOrder = 21
+  fg.visible = false
   root.add(fg)
+}
+
+export function setHealthBarVisibility(model, visible) {
+  const bg = model?.getObjectByName('bg')
+  const fg = model?.getObjectByName('fg')
+  if (bg) bg.visible = visible
+  if (fg) fg.visible = visible
 }
 
 export function mkClown(scene) {
