@@ -1,14 +1,29 @@
 import { useState, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { aI, aW, mkClown, mkCop, setHealthBarVisibility } from "./characters";
+import { resolveMeleeAttack, traceGunshot } from "./combat";
 import { clearNavigation, moveAgent } from "./navigation";
 
 const CFG={MAP:60,WALK:4,SPRINT:7,AI:8,TIME:240,RAGE_T:60,AR:3.5,AD:100,ACD:1.2,WHP:50,MHP:200,SENS:.004,PSR:9,PSD:25,PSCD:1.2,PMK:30,WIN_W:5,COL_T:3};
 const BD=[[-8,-8,6,5,8],[8,-10,8,4,6],[-12,8,5,6,5],[10,6,7,4,7],[0,15,10,3,4],[-18,-2,4,5,10],[18,-3,5,4,8],[0,-18,12,3,5],[-22,16,6,4,6],[22,14,5,5,5],[-20,-16,7,3,7],[20,-16,6,4,6]];
+const makeCombatBounds=()=>BD.map(([x,z,w,h,d])=>({x1:x-w/2,x2:x+w/2,z1:z-d/2,z2:z+d/2,y1:0,y2:h+.3}));
 const WP=[[-25,-22],[25,-20],[-24,22],[24,20],[0,-26],[0,26]];
 const px=c=>new THREE.MeshStandardMaterial({color:c,flatShading:true,roughness:.85,metalness:.05});
 
 function enableShadows(g){g.traverse(c=>{if(c.isMesh){c.castShadow=true;c.receiveShadow=true;}});}
+
+function disposeSceneGraph(scene){
+  const geometries=new Set(),materials=new Set(),textures=new Set();
+  scene?.traverse(item=>{if(item.geometry)geometries.add(item.geometry);const list=Array.isArray(item.material)?item.material:[item.material];list.filter(Boolean).forEach(mat=>{materials.add(mat);Object.values(mat).forEach(value=>{if(value?.isTexture)textures.add(value);});});});
+  textures.forEach(texture=>texture.dispose());materials.forEach(material=>material.dispose());geometries.forEach(geometry=>geometry.dispose());scene?.clear();
+}
+
+function disposeDetachedCharacter(model){
+  for(const name of ['bg','fg']){
+    const mesh=model?.getObjectByName(name);if(!mesh)continue;
+    mesh.geometry?.dispose();const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];materials.filter(Boolean).forEach(material=>material.dispose());
+  }
+}
 
 // 粒子特效系统
 function mkParticles(sc){
@@ -153,6 +168,12 @@ export default function MultiplayerGame({ onBack }) {
   screenRef.current = screen;
   const handleServerMsgRef = useRef(null);
 
+  function stopGame(){
+    if(frameRef.current){cancelAnimationFrame(frameRef.current);frameRef.current=0;}
+    const G=gRef.current;if(G){G.alive=false;try{disposeSceneGraph(G.sc);G.ren?.dispose();G.ren?.forceContextLoss?.();}catch(e){}gRef.current=null;}
+    const ct=mountRef.current;while(ct&&ct.firstChild)ct.removeChild(ct.firstChild);jtId.current=null;ltId.current=null;keysR.current={};needInit.current=false;if(knobRef.current)knobRef.current.style.transform='translate(0,0)';
+  }
+
   useEffect(() => {
     if (screen === 'game' && !(gRef.current && gRef.current.alive)) needInit.current = true;
   }, [screen]);
@@ -171,15 +192,15 @@ export default function MultiplayerGame({ onBack }) {
   useEffect(() => {
     return () => {
       if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
-      if (gRef.current) { gRef.current.alive = false; try { gRef.current.ren.dispose(); } catch (e) {} }
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      stopGame();
     };
   }, []);
 
   function connectWS(onCreate) {
     setConnErr('');
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const WS_URL = import.meta.env.VITE_WS_URL || (location.port ? `${proto}//${location.hostname}:3001` : `${proto}//${location.host}`);
+    const defaultWsUrl=import.meta.env.DEV?`${proto}//${location.hostname}:3001`:`${proto}//${location.host}`;
+    const WS_URL = import.meta.env.VITE_WS_URL || defaultWsUrl;
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
@@ -191,9 +212,10 @@ export default function MultiplayerGame({ onBack }) {
       }
     };
 
-    ws.onerror = () => { setConnErr('连接服务器失败，请检查服务器是否启动'); setScreen('lobby'); };
+    ws.onerror = () => {if(wsRef.current!==ws)return;stopGame();setConnErr('连接服务器失败，请检查服务器是否启动');setScreen('lobby');};
     ws.onclose = () => {
-      if (screenRef.current === 'game') { setConnErr('与服务器断开连接'); setScreen('lobby'); }
+      if(wsRef.current!==ws)return;wsRef.current=null;
+      if(screenRef.current!=='lobby'){stopGame();setPlayerList([]);setConnErr('与服务器断开连接');setScreen('lobby');}
     };
 
     ws.onmessage = (e) => {
@@ -206,7 +228,7 @@ export default function MultiplayerGame({ onBack }) {
   function handleServerMsg(msg) {
     const G = gRef.current;
 
-    if (msg.type === 'error') { setConnErr(msg.msg); setScreen('lobby'); return; }
+    if (msg.type === 'error') {if(G)stopGame();setConnErr(msg.msg);setScreen('lobby');return;}
 
     if (msg.type === 'welcome') {
       setRoomId(msg.roomId);
@@ -219,6 +241,7 @@ export default function MultiplayerGame({ onBack }) {
     if (msg.type === 'playerList') {
       setPlayerList(msg.list);
       setMaxPlayers(msg.maxPlayers);
+      setIsHost(msg.hostId===wsRef.current?._myId);
       return;
     }
 
@@ -251,6 +274,7 @@ export default function MultiplayerGame({ onBack }) {
       const op = G.otherPlayers[msg.id];
       if (op && op.alive) {
         if (op.role !== msg.role) {
+          disposeDetachedCharacter(op.m);
           G.sc.remove(op.m);
           op.m = msg.role === 'clown' ? mkClown(G.sc) : mkCop(G.sc);
         }
@@ -343,7 +367,7 @@ export default function MultiplayerGame({ onBack }) {
       const op = G.otherPlayers[msg.id];
       if (op) {
         if (op.role !== 'police') {
-          const oldPosition=op.p.clone();G.sc.remove(op.m);op.m=mkCop(G.sc);op.m.position.copy(oldPosition);
+          const oldPosition=op.p.clone();disposeDetachedCharacter(op.m);G.sc.remove(op.m);op.m=mkCop(G.sc);op.m.position.copy(oldPosition);
         }
         op.alive = true; op.role = 'police'; op.hp = 50; op.m.visible = true;
         setHealthBarVisibility(op.m, G.role === 'police');
@@ -352,16 +376,13 @@ export default function MultiplayerGame({ onBack }) {
 
     if (msg.type === 'leave') {
       const op = G.otherPlayers[msg.id];
-      if (op) { G.sc.remove(op.m); delete G.otherPlayers[msg.id]; }
+      if (op) { disposeDetachedCharacter(op.m);G.sc.remove(op.m); delete G.otherPlayers[msg.id]; }
       G.af('👤 有玩家离开了游戏', '#888');
     }
   }
 
   function initGame() {
-    if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    if (gRef.current) { gRef.current.alive = false; try { gRef.current.ren.dispose(); } catch (e) {} }
-    const ct = mountRef.current;
-    while (ct && ct.firstChild) ct.removeChild(ct.firstChild);
+    stopGame();const ct = mountRef.current;
 
     const welcome = wsRef.current?._welcome || {};
     const myId = welcome.id || 'local';
@@ -398,7 +419,7 @@ export default function MultiplayerGame({ onBack }) {
     sc.add(new THREE.HemisphereLight(0x87CEEB, 0x5B8731, .45));
 
     const bx = [];
-    buildWorld(sc, bx);
+    buildWorld(sc, bx);const cbx=makeCombatBounds();
 
     function inB(x, z) { return bx.some(v => x > v.x1 && x < v.x2 && z > v.z1 && z < v.z2); }
     function rC(p) {
@@ -454,7 +475,7 @@ export default function MultiplayerGame({ onBack }) {
     function af(msg, col) { feed.push({ msg, col, t: 4 }); if (feed.length > 5) feed.shift(); }
 
     const G = {
-      sc, cam, ren, bx, ais, wals, otherPlayers, myId, pfx,
+      sc, cam, ren, bx, cbx, ais, wals, otherPlayers, myId, pfx,
       pos: new THREE.Vector3(startPos.x, 0, startPos.z),
       yaw: 0, pitch: 0,
       hp: 100,
@@ -466,7 +487,7 @@ export default function MultiplayerGame({ onBack }) {
       jx: 0, jy: 0, acd: 0, al: '', at: 0,
       clk: new THREE.Clock(), alive: true,
       gameT: 0, fS, rC, af, feed, posSyncT: 0,
-      hitFlash: { angle: 0, alpha: 0 }, bigHit: null
+      hitFlash: { angle: 0, alpha: 0 }, bigHit: null, hudT: 0
     };
     gRef.current = G;
     G.clk.start();
@@ -607,11 +628,14 @@ export default function MultiplayerGame({ onBack }) {
       if (G.role === 'clown' && G.wc >= CFG.WIN_W) { G.alive = false; setInfo({ w: true, t: '🎉 CLOWN WIN', d: '占领5个钱包！' }); setScreen('over'); return; }
       if (G.tm <= 0) { G.alive = false; setInfo(G.role === 'clown' ? { w: false, t: '💀 TIME UP', d: '失败' } : { w: true, t: '🎉 POLICE WIN', d: '守住了！' }); setScreen('over'); return; }
 
-      drawMM();
-      const mn = Math.floor(Math.max(0, G.tm) / 60), s2 = Math.floor(Math.max(0, G.tm) % 60);
-      let st = G.role === 'clown' ? (G.spr ? '💨 疾跑' : G.col ? '💰 占领中' : '🤡 潜行中') : '👮 搜索中';
-      const pCount = Object.values(otherPlayers).filter(p => p.alive).length;
-      setHud({ hp: G.hp, mhp: G.mhp, wc: G.wc, pc: pCount, tm: mn + ':' + String(s2).padStart(2, '0'), rl: G.role, st, spr: G.spr, al: G.al, cp: G.col ? G.cp / CFG.COL_T : -1, fd: feed.map(f => ({ msg: f.msg, col: f.col })), hitFlash: G.hitFlash.alpha > 0.01 ? { ...G.hitFlash } : null, bigHit: G.bigHit?.alpha > 0.01 ? { ...G.bigHit } : null });
+      G.hudT-=dt;
+      if(G.hudT<=0){
+        G.hudT=.1;drawMM();
+        const mn = Math.floor(Math.max(0, G.tm) / 60), s2 = Math.floor(Math.max(0, G.tm) % 60);
+        let st = G.role === 'clown' ? (G.spr ? '💨 疾跑' : G.col ? '💰 占领中' : '🤡 潜行中') : '👮 搜索中';
+        const pCount = Object.values(otherPlayers).filter(p => p.alive).length;
+        setHud({ hp: G.hp, mhp: G.mhp, wc: G.wc, pc: pCount, tm: mn + ':' + String(s2).padStart(2, '0'), rl: G.role, st, spr: G.spr, al: G.al, cp: G.col ? G.cp / CFG.COL_T : -1, fd: feed.map(f => ({ msg: f.msg, col: f.col })), hitFlash: G.hitFlash.alpha > 0.01 ? { ...G.hitFlash } : null, bigHit: G.bigHit?.alpha > 0.01 ? { ...G.bigHit } : null });
+      }
       ren.render(sc, cam);
     }
 
@@ -626,14 +650,11 @@ export default function MultiplayerGame({ onBack }) {
   function doAtk() {
     const G = gRef.current; if (!G || G.acd > 0 || !G.alive) return;
     G.acd = CFG.ACD;
+    const dir = new THREE.Vector3();G.cam.getWorldDirection(dir);
     if (G.role === 'clown') {
-      // 小丑：近战攻击附近警察玩家
-      let hit = null, md = CFG.AR;
-      Object.entries(G.otherPlayers).forEach(([id, op]) => {
-        if (!op.alive || op.role !== 'police') return;
-        const d = G.pos.distanceTo(op.p);
-        if (d < md) { md = d; hit = { id, op }; }
-      });
+      const targets=Object.entries(G.otherPlayers).map(([id,op])=>({id,op,p:op.p,alive:op.alive,role:op.role}));
+      const strike=resolveMeleeAttack({origin:G.cam.position,direction:dir,targets,obstacles:G.cbx,range:CFG.AR,halfAngle:Math.PI*.32,targetHeight:1.05,obstaclePadding:.02,filter:target=>target.role==='police'});
+      const hit=strike.type==='target'?strike.target:null;
       if (hit) {
         wsRef.current?.send(JSON.stringify({ type: 'attack', targetId: hit.id, role: 'clown' }));
         G.al = '⚔️ 攻击！'; G.at = 1.5;
@@ -641,28 +662,11 @@ export default function MultiplayerGame({ onBack }) {
         G.pfx.spawnHit(hit.op.p.clone().add(new THREE.Vector3(0,1,0)));
       } else { G.al = '⚔️ MISS'; G.at = 1; }
     } else {
-      // 警察：射击前方目标（投影到水平面避免pitch影响）
-      const dir = new THREE.Vector3(); G.cam.getWorldDirection(dir);
-      dir.y = 0; dir.normalize();
-      let hit = null, hd2 = Infinity, hitAI = null;
-      // 检查真人小丑
-      Object.entries(G.otherPlayers).forEach(([id, op]) => {
-        if (!op.alive || op.role !== 'clown') return;
-        const d = G.pos.distanceTo(op.p);
-        if (d < 30 && d < hd2) {
-          const tc = new THREE.Vector3().subVectors(op.p, G.pos); tc.y = 0; tc.normalize();
-          if (tc.dot(dir) > .65) { hit = { id, op }; hd2 = d; }
-        }
-      });
-      // 检查AI小丑
-      G.ais.forEach((c, i) => {
-        if (!c.a) return;
-        const d = G.pos.distanceTo(c.p);
-        if (d < 30 && d < hd2) {
-          const tc = new THREE.Vector3().subVectors(c.p, G.pos); tc.y = 0; tc.normalize();
-          if (tc.dot(dir) > .65) { hit = null; hitAI = { idx: i, c }; hd2 = d; }
-        }
-      });
+      const humanTargets=Object.entries(G.otherPlayers).map(([id,op])=>({kind:'player',id,op,p:op.p,alive:op.alive,role:op.role}));
+      const aiTargets=G.ais.map((c,index)=>({kind:'ai',index,c,p:c.p,a:c.a,role:'clown'}));
+      const shot=traceGunshot({origin:G.cam.position,direction:dir,targets:[...humanTargets,...aiTargets],obstacles:G.cbx,range:30,targetRadius:.58,targetHeight:1.1,obstaclePadding:.01,filter:target=>target.role==='clown'});
+      const hit=shot.type==='target'&&shot.target.kind==='player'?shot.target:null;
+      const hitAI=shot.type==='target'&&shot.target.kind==='ai'?shot.target:null;
       // 枪口闪光
       const mzDir = new THREE.Vector3(); G.cam.getWorldDirection(mzDir); mzDir.y = 0; mzDir.normalize();
       G.pfx.spawnMuzzle(G.pos.clone().add(new THREE.Vector3(0,1.2,0)), mzDir);
@@ -683,7 +687,7 @@ export default function MultiplayerGame({ onBack }) {
           setInfo({ w: false, t: '💀 DEFEAT', d: '误杀过多阵亡' });
           setScreen('over');
         }
-      } else { G.al = '🔫 MISS'; G.at = 1; }
+      } else { G.al = shot.type==='obstacle'?'🧱 BLOCKED':'🔫 MISS'; G.at = 1; }
     }
   }
 
@@ -705,8 +709,7 @@ export default function MultiplayerGame({ onBack }) {
 
   function handleLeave() {
     if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
-    if (gRef.current) { gRef.current.alive = false; try { gRef.current.ren.dispose(); } catch (e) {} gRef.current = null; }
-    if (frameRef.current) { cancelAnimationFrame(frameRef.current); frameRef.current = 0; }
+    stopGame();
     onBack();
   }
 
@@ -822,10 +825,10 @@ export default function MultiplayerGame({ onBack }) {
         {isHost ? <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 10, color: '#aaa' }}>人数上限</span>
-            {[2,3,4,5,6].map(n => (
-              <button key={n} style={{ width: 30, height: 30, border: '2px solid ' + (maxPlayers===n?'#4a4':'#444'), background: maxPlayers===n?'rgba(0,200,0,.2)':'transparent', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
-                onClick={() => { setMaxPlayers(n); wsRef.current?.send(JSON.stringify({ type: 'setMax', maxPlayers: n })); }}>{n}</button>
-            ))}
+            {[2,3,4,5,6].map(n => {const disabled=n<playerList.length;return(
+              <button key={n} disabled={disabled} style={{ width: 30, height: 30, border: '2px solid ' + (maxPlayers===n?'#4a4':'#444'), background:maxPlayers===n?'rgba(0,200,0,.2)':'transparent',color:disabled?'#444':'#fff',opacity:disabled ? .55 : 1,fontSize:12,fontWeight:700,cursor:disabled?'not-allowed':'pointer',fontFamily:'inherit' }}
+                onClick={() => {if(disabled)return;setMaxPlayers(n);wsRef.current?.send(JSON.stringify({type:'setMax',maxPlayers:n}));}}>{n}</button>
+            )})}
           </div>
           <button
             style={{ ...mcB, background: playerList.length >= 2 ? 'linear-gradient(180deg,#4a4,#383)' : 'linear-gradient(180deg,#333,#222)', color: playerList.length >= 2 ? '#fff' : '#555', cursor: playerList.length >= 2 ? 'pointer' : 'default' }}

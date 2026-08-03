@@ -9,6 +9,10 @@
     "server": "node server.js",
     "build": "vite build",
     "test:navigation": "node scripts/test-navigation.mjs",
+    "test:combat": "node scripts/test-combat.mjs",
+    "test:suspicion": "node scripts/test-suspicion.mjs",
+    "test:server": "npm run build && node scripts/test-server-security.mjs",
+    "test": "npm run test:navigation && npm run test:combat && npm run test:suspicion && npm run test:server",
     "preview": "vite preview"
   },
   "dependencies": {

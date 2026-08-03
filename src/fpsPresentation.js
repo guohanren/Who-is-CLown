@@ -163,11 +163,21 @@ export function createCombatFx(scene) {
     }
   }
 
+  function dispose() {
+    for (const particle of particles) {
+      scene.remove(particle.item)
+      particle.item.geometry.dispose()
+      particle.item.material.dispose()
+    }
+    particles.length = 0
+  }
+
   return {
     hit(position) { burst(position.clone().add(new THREE.Vector3(0, 1.05, 0)), 0xff4d35, 10, 4.2, .5) },
     miss(position) { burst(position, 0xffcb63, 5, 2.5, .28) },
     pickup(position) { burst(position.clone().add(new THREE.Vector3(0, .6, 0)), 0xffd34d, 18, 3.2, .8) },
     update,
+    dispose,
   }
 }
 
@@ -221,6 +231,12 @@ export function createGameAudio() {
     source.start()
   }
 
+  function dispose() {
+    unlocked = false
+    if (context && context.state !== 'closed') context.close().catch(() => {})
+    context = null
+  }
+
   return {
     unlock: getContext,
     shoot() { noise(.12, .18, 3200); tone(150, 55, .14, 'sawtooth', .12) },
@@ -237,5 +253,6 @@ export function createGameAudio() {
       if (!unlocked) return
       noise(.045, .018, 420)
     },
+    dispose,
   }
 }
